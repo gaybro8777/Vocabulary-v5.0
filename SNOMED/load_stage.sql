@@ -40,6 +40,7 @@ TRUNCATE TABLE drug_strength_stage;
 --3. Create core version of DM+D
 --3.1. We need to create temporary table of DM+D with the same structure as concept_stage and pseudo-column 'insert_id'
 --later it will be important
+
 DROP TABLE IF EXISTS concept_stage_dmd;
 CREATE UNLOGGED TABLE concept_stage_dmd (LIKE concept_stage);
 ALTER TABLE concept_stage_dmd ADD insert_id INTEGER;
@@ -453,7 +454,8 @@ SELECT concept_name,
 FROM concept_stage_dmd;
 
 --4. Create core version of SNOMED without concept_id, domain_id, concept_class_id, standard_concept
-INSERT INTO concept_stage (
+insert into concept_stage
+(
 	concept_name,
 	vocabulary_id,
 	concept_code,
@@ -461,9 +463,9 @@ INSERT INTO concept_stage (
 	valid_end_date,
 	invalid_reason
 	)
-SELECT regexp_replace(sct2.concept_name, ' (\([^)]*\))$', ''), -- pick the umls one first (if there) and trim something like "(procedure)"
-	'SNOMED' AS vocabulary_id,
-	sct2.concept_code,
+  select   first_value (regexp_replace(a.term, ' (\([^)]*\))$', '')) over (partition by a.conceptid order by a.effectivetime desc) as concept_name ,
+'SNOMED' AS vocabulary_id,
+	a.conceptid::varchar,
 	(
 		SELECT latest_update
 		FROM vocabulary
@@ -471,42 +473,19 @@ SELECT regexp_replace(sct2.concept_name, ' (\([^)]*\))$', ''), -- pick the umls 
 		) AS valid_start_date,
 	TO_DATE ('20991231', 'yyyymmdd') AS valid_end_date,
 	NULL AS invalid_reason
-FROM (
-	SELECT SUBSTR(d.term, 1, 255) AS concept_name,
-		d.conceptid::TEXT AS concept_code,
-		c.active,
-		ROW_NUMBER() OVER (
-			PARTITION BY d.conceptid
-			-- Order of preference: newest in sct2_concept, in sct2_desc, synonym, does not contain class in parenthesis
-			ORDER BY TO_DATE(c.effectivetime, 'YYYYMMDD') DESC,
-				TO_DATE(d.effectivetime, 'YYYYMMDD') DESC,
-				CASE 
-					WHEN typeid = 900000000000013009
-						THEN 0
-					ELSE 1
-					END,
-				CASE 
-					WHEN term LIKE '%(%)%'
-						THEN 1
-					ELSE 0
-					END,
-				LENGTH(TERM) DESC,
-				d.id DESC --same as of AVOF-650
-			) AS rn
-	FROM sources.sct2_concept_full_merged c,
-		sources.sct2_desc_full_merged d
-	WHERE c.id = d.conceptid
-		AND term IS NOT NULL
-	) sct2
-WHERE sct2.rn = 1
-	AND sct2.active = 1
-	AND NOT EXISTS (
+	
+from sources.sct2_desc_full_merged a
+  left join sources.sct2_desc_full_merged b  on a.id =b.id and b.active = 0
+  where b.conceptid is null
+  and a.typeid =900000000000003001
+  and a.languagecode = 'en'
+  	AND NOT EXISTS (
 		--DM+D first, SNOMED last
 		SELECT 1
 		FROM concept_stage cs_int
-		WHERE cs_int.concept_code = sct2.concept_code
-		);
-
+		WHERE cs_int.concept_code = a.conceptid::varchar
+		)
+		;
 --5. Update concept_class_id from extracted class information and terms ordered by some good precedence
 UPDATE concept_stage cs
 SET concept_class_id = i.concept_class_id
@@ -2139,6 +2118,7 @@ END $_$;
   END $_$;
 
   --16. Start building the hierarchy for progagating domain_ids from toop to bottom
+/*
   DROP TABLE IF EXISTS snomed_ancestor;
   CREATE UNLOGGED TABLE snomed_ancestor AS (
   	WITH recursive hierarchy_concepts(ancestor_concept_code, descendant_concept_code, root_ancestor_concept_code, full_path) AS (
@@ -2175,7 +2155,7 @@ END $_$;
   ALTER TABLE snomed_ancestor ADD CONSTRAINT xpksnomed_ancestor PRIMARY KEY (ancestor_concept_code,descendant_concept_code);
 
   ANALYZE snomed_ancestor;
-
+*/
   --17. Create domain_id
   --17.1. Manually create table with "Peaks" = ancestors of records that are all of the same domain
 
@@ -2998,12 +2978,12 @@ END $_$;
   	('1240471000000102','SNOMED','Measurement of SARS-CoV-2 antigen',4180186);
 
   --23. Clean up
-  /*
+/*
   DROP TABLE peak;
   DROP TABLE domain_snomed;
   DROP TABLE concept_stage_dmd;
   DROP TABLE snomed_ancestor;
-  */
+*/
 
   --24. Need to check domains before runnig the generic_update
 /*  temporary disabled for later use
