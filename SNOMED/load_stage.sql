@@ -1,3 +1,23 @@
+--to do
+/*
+1) нужно вернуться к PT (у нас так и было для большинства концептов, и никто не жаловался)
+2) можно имена сномеда оставить как есть сейчас. там действительно совсем малое количество и я даже не уверен, что то что имена поменялись - они не правильные. просто мы считаем главным UMLS, т.е. US SNOMED, можно вообще считать это фичей
+3) само по себе определение имен в сномеде очень странное. надо переписать правильно, когда будем делать рефакторинг сномеда.
+here's a query that could be easily turned into proper concept name retrieval
+
+select distinct a.typeid, a.conceptid, a.term,  
+e.concept_name as typeid_name,
+c.concept_name as refset_name, d.concept_name as acceptability_name, source_file_id from 
+sources.sct2_desc_full_merged a
+join sources.der2_crefset_language_merged b on a.id = b.referencedcomponentid
+join concept_stage c on c.concept_code = refsetid::varchar --get the refset
+join concept_stage d on d.concept_code = acceptabilityid::varchar --get the refset
+join concept_stage e on e.concept_code = a.typeid::varchar --get the refset
+ where 
+  a.conceptid = 701031006 -- Mechanical (o)esophageal stethoscope
+  ;
+*/
+
 /**************************************************************************
 * Copyright 2016 Observational Health Data Sciences and Informatics (OHDSI)
 *
